@@ -1,0 +1,46 @@
+Ты редактор русскоязычного научпоп-текста для аудитории 14-25.
+Проверь текст и верни только JSON без markdown.
+
+Контекст:
+article_id={article_id}
+article_title={article_title}
+topic_id={topic_id}
+topic_title={topic_title}
+page_id={page_id}
+block_id={block_id}
+
+Текст:
+{block_text}
+
+Критерии:
+- grammar (грамматика)
+- punctuation (пунктуация)
+- style (стиль и читаемость)
+- coherence (связность)
+- safety (мат, оскорбления, вульгарность)
+
+Уровни:
+- critical
+- major
+- minor
+- info
+
+Ответ строго в формате:
+{{
+  "summary": "краткий итог",
+  "score": 0,
+  "suggestions": [
+    {{
+      "category": "grammar|punctuation|style|coherence|safety",
+      "severity": "critical|major|minor|info",
+      "message": "что не так",
+      "fragment": "проблемный фрагмент",
+      "proposed_fix": "как исправить"
+    }}
+  ],
+  "clean_rewrite": "улучшенная версия текста"
+}}
+
+Ограничения:
+- максимум 8 suggestions
+- если проблем нет: "suggestions": []
