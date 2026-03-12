@@ -1,4 +1,5 @@
 import json
+import re
 from typing import Any
 
 from ai_module.core.config import settings
@@ -60,10 +61,7 @@ class GigaChatProvider(LLMProvider):
             raise ProviderError(f"GigaChat request failed: {exc}") from exc
 
         content = self._extract_content(response)
-        try:
-            return json.loads(content)
-        except json.JSONDecodeError as exc:
-            raise ProviderError("GigaChat returned non-JSON response") from exc
+        return self._parse_json_content(content)
 
     @staticmethod
     def _extract_content(response: Any) -> str:
@@ -71,3 +69,31 @@ class GigaChatProvider(LLMProvider):
             return response.choices[0].message.content
         except Exception as exc:
             raise ProviderError("Unexpected GigaChat response schema") from exc
+
+    @staticmethod
+    def _parse_json_content(content: str) -> dict[str, Any]:
+        normalized = content.strip()
+
+        # Common model format: ```json ... ```
+        fence = re.match(r"^```(?:json)?\s*(.*?)\s*```$", normalized, flags=re.DOTALL)
+        if fence:
+            normalized = fence.group(1).strip()
+
+        try:
+            parsed = json.loads(normalized)
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+        # Fallback: extract first JSON object from mixed text.
+        match = re.search(r"\{.*\}", normalized, flags=re.DOTALL)
+        if match:
+            try:
+                parsed = json.loads(match.group(0))
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+        raise ProviderError("GigaChat returned non-JSON response")
