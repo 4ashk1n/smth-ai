@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Optional, Union
 
@@ -191,8 +191,8 @@ class Article:
     categories: list[str] = field(default_factory=list)
     status: ArticleStatus = ArticleStatus.DRAFT
     published_at: Optional[DateTimeLike] = None
-    created_at: DateTimeLike = field(default_factory=datetime.utcnow)
-    updated_at: DateTimeLike = field(default_factory=datetime.utcnow)
+    created_at: DateTimeLike = field(default_factory=lambda: datetime.now(timezone.utc))
+    updated_at: DateTimeLike = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
         if not self.id.strip():
