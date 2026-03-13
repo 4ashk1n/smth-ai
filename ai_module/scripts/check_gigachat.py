@@ -1,16 +1,19 @@
-import argparse
+﻿import argparse
 import time
 
 from ai_module.core.config import settings
 from ai_module.core.errors import ProviderError
+from ai_module.core.logging import configure_logging
 from ai_module.providers.llm.gigachat_provider import GigaChatProvider
 
 
 def main() -> int:
+    configure_logging()
+
     parser = argparse.ArgumentParser(description="Live connectivity check for GigaChat")
     parser.add_argument(
         "--prompt",
-        default="Ответь одним словом: OK",
+        default="Reply with one word: OK",
         help="Prompt for live check",
     )
     args = parser.parse_args()
@@ -23,9 +26,9 @@ def main() -> int:
 
     # Keep output contract compact and parseable.
     wrapped_prompt = (
-        "Верни JSON без markdown: "
-        '{"status":"ok","echo":"<краткий ответ не длиннее 10 слов>"}\n'
-        f"Запрос: {args.prompt}"
+        "Return JSON without markdown: "
+        '{"status":"ok","echo":"<short answer up to 10 words>"}\n'
+        f"Request: {args.prompt}"
     )
 
     started = time.perf_counter()
@@ -44,4 +47,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

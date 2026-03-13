@@ -1,6 +1,7 @@
+﻿import logging
 from uuid import uuid4
 
-from ai_module.core.errors import SuggestionBuildError, ValidationError
+from ai_module.core.errors import ProviderError, SuggestionBuildError, ValidationError
 from ai_module.domain.entities import (
     Article,
     BlockParagraph,
@@ -11,6 +12,8 @@ from ai_module.domain.entities import (
 )
 from ai_module.providers.llm.base import LLMProvider
 from ai_module.providers.llm.prompt_builder import PromptBuilder
+
+logger = logging.getLogger("ai_module.pipeline.text")
 
 
 class TextQualityPipeline:
@@ -40,7 +43,18 @@ class TextQualityPipeline:
                 page=page,
                 block=block,
             )
-            raw = self.llm_provider.generate_json(prompt=prompt)
+            try:
+                raw = self.llm_provider.generate_json(prompt=prompt)
+            except ProviderError as exc:
+                logger.warning(
+                    "skip_block_due_to_llm_error article_id=%s page_id=%s block_id=%s error=%s",
+                    article.id,
+                    page.id,
+                    block.id,
+                    exc,
+                )
+                continue
+
             suggestions.extend(
                 self._to_suggestions(
                     article_id=article.id,
@@ -105,6 +119,7 @@ class TextQualityPipeline:
             "coherence": SuggestionCategory.COHERENCE,
             "factuality": SuggestionCategory.FACTUALITY,
             "layout": SuggestionCategory.LAYOUT,
+            "safety": SuggestionCategory.STYLE,
         }
         return mapping.get(str(value).lower(), SuggestionCategory.STYLE)
 
@@ -118,4 +133,3 @@ class TextQualityPipeline:
             "suggestion": SuggestionSeverity.INFO,
         }
         return mapping.get(str(value).lower(), SuggestionSeverity.MINOR)
-

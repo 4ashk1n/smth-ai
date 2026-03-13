@@ -1,10 +1,13 @@
-import json
+﻿import json
+import logging
 import re
 from typing import Any
 
 from ai_module.core.config import settings
 from ai_module.core.errors import ProviderError
 from ai_module.providers.llm.base import LLMProvider
+
+logger = logging.getLogger("ai_module.llm.gigachat")
 
 
 class GigaChatProvider(LLMProvider):
@@ -61,7 +64,11 @@ class GigaChatProvider(LLMProvider):
             raise ProviderError(f"GigaChat request failed: {exc}") from exc
 
         content = self._extract_content(response)
-        return self._parse_json_content(content)
+        logger.info("gigachat_raw_response model=%s content=%s", self.model, content)
+
+        parsed = self._parse_json_content(content)
+        logger.info("gigachat_parsed_response model=%s payload=%s", self.model, parsed)
+        return parsed
 
     @staticmethod
     def _extract_content(response: Any) -> str:
@@ -79,21 +86,130 @@ class GigaChatProvider(LLMProvider):
         if fence:
             normalized = fence.group(1).strip()
 
-        try:
-            parsed = json.loads(normalized)
-            if isinstance(parsed, dict):
+        parsed = _try_parse_dict(normalized)
+        if parsed is not None:
+            return parsed
+
+        candidate = _extract_balanced_json_object(normalized)
+        if candidate is not None:
+            parsed = _try_parse_dict(candidate)
+            if parsed is not None:
                 return parsed
-        except json.JSONDecodeError:
-            pass
 
-        # Fallback: extract first JSON object from mixed text.
-        match = re.search(r"\{.*\}", normalized, flags=re.DOTALL)
-        if match:
-            try:
-                parsed = json.loads(match.group(0))
-                if isinstance(parsed, dict):
-                    return parsed
-            except json.JSONDecodeError:
-                pass
+            repaired = _repair_json_like(candidate)
+            parsed = _try_parse_dict(repaired)
+            if parsed is not None:
+                logger.warning("gigachat_json_repaired original=%s repaired=%s", candidate, repaired)
+                return parsed
 
-        raise ProviderError("GigaChat returned non-JSON response")
+        preview = normalized[:280].replace("\n", "\\n")
+        raise ProviderError(f"GigaChat returned non-JSON response: {preview}")
+
+
+def _try_parse_dict(raw: str) -> dict[str, Any] | None:
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _extract_balanced_json_object(text: str) -> str | None:
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escape = False
+
+    for idx in range(start, len(text)):
+        char = text[idx]
+
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : idx + 1]
+
+    return text[start:]
+
+
+def _repair_json_like(raw: str) -> str:
+    repaired = raw.strip()
+
+    repaired = _collapse_duplicate_braces(repaired)
+
+    # Remove trailing commas before object/array end.
+    repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+
+    # Close unbalanced braces/brackets outside strings.
+    stack: list[str] = []
+    in_string = False
+    escape = False
+
+    for char in repaired:
+        if in_string:
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+        elif char in "[{":
+            stack.append(char)
+        elif char == "]" and stack and stack[-1] == "[":
+            stack.pop()
+        elif char == "}" and stack and stack[-1] == "{":
+            stack.pop()
+
+    while stack:
+        opener = stack.pop()
+        repaired += "]" if opener == "[" else "}"
+
+    return repaired
+
+
+def _collapse_duplicate_braces(text: str) -> str:
+    out: list[str] = []
+    in_string = False
+    escape = False
+
+    for char in text:
+        if in_string:
+            out.append(char)
+            if escape:
+                escape = False
+            elif char == "\\":
+                escape = True
+            elif char == '"':
+                in_string = False
+            continue
+
+        if char == '"':
+            in_string = True
+            out.append(char)
+            continue
+
+        if char in "{}" and out and out[-1] == char:
+            continue
+
+        out.append(char)
+
+    return "".join(out)
