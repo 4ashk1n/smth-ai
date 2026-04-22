@@ -1,7 +1,7 @@
-import pytest
+﻿import pytest
 
 from ai_module.application.pipelines.text_quality_pipeline import TextQualityPipeline
-from ai_module.core.errors import ValidationError
+from ai_module.core.errors import ProviderError, ValidationError
 from ai_module.domain.entities import (
     Article,
     ArticleStatus,
@@ -18,7 +18,7 @@ from ai_module.providers.llm.prompt_builder import PromptBuilder
 
 class StubLLMProvider:
     def generate_json(self, *, prompt: str) -> dict:
-        assert "Текст:" in prompt
+        assert "<USER_TEXT>" in prompt
         return {
             "summary": "ok",
             "suggestions": [
@@ -30,6 +30,11 @@ class StubLLMProvider:
                 }
             ],
         }
+
+
+class FailingLLMProvider:
+    def generate_json(self, *, prompt: str) -> dict:
+        raise ProviderError("broken json")
 
 
 def build_article_with_blocks() -> Article:
@@ -74,6 +79,15 @@ def test_pipeline_returns_suggestions_for_paragraph_blocks_only() -> None:
     assert len(suggestions) == 1
     assert suggestions[0].block_id == "b1"
     assert suggestions[0].message
+
+
+def test_pipeline_skips_block_if_provider_fails() -> None:
+    pipeline = TextQualityPipeline(
+        llm_provider=FailingLLMProvider(),
+        prompt_builder=PromptBuilder(),
+    )
+    suggestions = pipeline.run_for_article(build_article_with_blocks())
+    assert suggestions == []
 
 
 def test_pipeline_raises_when_page_missing_for_block() -> None:
