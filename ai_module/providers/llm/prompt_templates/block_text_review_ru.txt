@@ -46,5 +46,5 @@ block_id={block_id}
       "proposed_fix": "как исправить"
     }}
   ],
-  "clean_rewrite": "улучшенная версия текста"
+  "clean_rewrite": "ПУСТАЯ СТРОКА"
 }}
