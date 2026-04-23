@@ -48,3 +48,15 @@ python -m ai_module.scripts.run_server --reload
 ```powershell
 python -m ai_module.scripts.check_gigachat
 ```
+
+## Recompute user feed (manual run)
+
+```powershell
+python -m ai_module.scripts.recompute_user_feed
+```
+
+Optional overrides:
+
+```powershell
+python -m ai_module.scripts.recompute_user_feed --top-k 100 --lookback-days 180 --half-life-days 30
+```
