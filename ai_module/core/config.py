@@ -42,6 +42,20 @@ if BaseSettings is object:
             )
             ca_bundle = _env("GIGACHAT_CA_BUNDLE_FILE", "")
             self.gigachat_ca_bundle_file = ca_bundle or None
+            self.database_url = _env("DATABASE_URL", "")
+            self.reco_top_k = int(_env("RECO_TOP_K", "100"))
+            self.reco_lookback_days = int(_env("RECO_LOOKBACK_DAYS", "180"))
+            self.reco_half_life_days = float(_env("RECO_HALF_LIFE_DAYS", "30"))
+            self.reco_max_items_per_user = int(_env("RECO_MAX_ITEMS_PER_USER", "200"))
+            self.reco_neighbors_per_item = int(_env("RECO_NEIGHBORS_PER_ITEM", "100"))
+            self.reco_min_score = float(_env("RECO_MIN_SCORE", "0"))
+            self.reco_weight_cf = float(_env("RECO_WEIGHT_CF", "0.5"))
+            self.reco_weight_category = float(_env("RECO_WEIGHT_CATEGORY", "0.25"))
+            self.reco_weight_freshness = float(_env("RECO_WEIGHT_FRESHNESS", "0.15"))
+            self.reco_weight_popularity = float(_env("RECO_WEIGHT_POPULARITY", "0.1"))
+            self.reco_freshness_half_life_days = float(_env("RECO_FRESHNESS_HALF_LIFE_DAYS", "14"))
+            self.reco_dirty_batch_size = int(_env("RECO_DIRTY_BATCH_SIZE", "200"))
+            self.reco_dirty_poll_interval_seconds = float(_env("RECO_DIRTY_POLL_INTERVAL_SECONDS", "5"))
 else:
     ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
@@ -58,6 +72,20 @@ else:
         gigachat_scope: str = "GIGACHAT_API_PERS"
         gigachat_verify_ssl_certs: bool = True
         gigachat_ca_bundle_file: str | None = None
+        database_url: str = ""
+        reco_top_k: int = 100
+        reco_lookback_days: int = 180
+        reco_half_life_days: float = 30.0
+        reco_max_items_per_user: int = 200
+        reco_neighbors_per_item: int = 100
+        reco_min_score: float = 0.0
+        reco_weight_cf: float = 0.5
+        reco_weight_category: float = 0.25
+        reco_weight_freshness: float = 0.15
+        reco_weight_popularity: float = 0.1
+        reco_freshness_half_life_days: float = 14.0
+        reco_dirty_batch_size: int = 200
+        reco_dirty_poll_interval_seconds: float = 5.0
 
         model_config = SettingsConfigDict(
             env_file=str(ENV_FILE),

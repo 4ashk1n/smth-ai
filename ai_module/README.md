@@ -48,3 +48,27 @@ python -m ai_module.scripts.run_server --reload
 ```powershell
 python -m ai_module.scripts.check_gigachat
 ```
+
+## Recompute user feed (manual run)
+
+```powershell
+python -m ai_module.scripts.recompute_user_feed
+```
+
+Optional overrides:
+
+```powershell
+python -m ai_module.scripts.recompute_user_feed --top-k 100 --lookback-days 180 --half-life-days 30
+```
+
+## Recompute dirty users (DB queue poller)
+
+```powershell
+python -m ai_module.scripts.poll_dirty_user_feed
+```
+
+One batch and exit:
+
+```powershell
+python -m ai_module.scripts.poll_dirty_user_feed --once --batch-size 200
+```
