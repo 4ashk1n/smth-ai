@@ -19,6 +19,15 @@ class FeedWriteStats:
 
 
 @dataclass(frozen=True)
+class DirtyBatch:
+    user_ids: list[str]
+
+    @property
+    def users_total(self) -> int:
+        return len(self.user_ids)
+
+
+@dataclass(frozen=True)
 class PublishedArticle:
     article_id: str
     published_at: datetime | None
@@ -49,6 +58,45 @@ class FeedRepository:
             cursor.execute('SELECT "id" FROM "users" ORDER BY "id"')
             rows = cursor.fetchall()
         return [row["id"] for row in rows]
+
+    def claim_dirty_user_ids(self, *, batch_size: int) -> DirtyBatch:
+        if batch_size <= 0:
+            return DirtyBatch(user_ids=[])
+
+        query = '''
+            WITH claimed AS (
+                SELECT "userId"
+                FROM "reco_dirty_users"
+                ORDER BY "updatedAt" ASC
+                LIMIT %s
+                FOR UPDATE SKIP LOCKED
+            )
+            DELETE FROM "reco_dirty_users" d
+            USING claimed
+            WHERE d."userId" = claimed."userId"
+            RETURNING d."userId" AS user_id
+        '''
+
+        with self.connection.cursor() as cursor:
+            cursor.execute(query, (batch_size,))
+            rows = cursor.fetchall()
+
+        return DirtyBatch(user_ids=[row["user_id"] for row in rows])
+
+    def mark_dirty_user_ids(self, user_ids: list[str]) -> None:
+        if not user_ids:
+            return
+        rows = list(dict.fromkeys(user_ids))
+        with self.connection.cursor() as cursor:
+            cursor.executemany(
+                '''
+                INSERT INTO "reco_dirty_users" ("userId", "updatedAt")
+                VALUES (%s, NOW())
+                ON CONFLICT ("userId")
+                DO UPDATE SET "updatedAt" = EXCLUDED."updatedAt"
+                ''',
+                [(user_id,) for user_id in rows],
+            )
 
     def fetch_interactions(self, *, lookback_days: int) -> list[InteractionSignal]:
         where_clauses = ['a."status" = %s']

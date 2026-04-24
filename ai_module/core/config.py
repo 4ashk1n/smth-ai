@@ -54,6 +54,8 @@ if BaseSettings is object:
             self.reco_weight_freshness = float(_env("RECO_WEIGHT_FRESHNESS", "0.15"))
             self.reco_weight_popularity = float(_env("RECO_WEIGHT_POPULARITY", "0.1"))
             self.reco_freshness_half_life_days = float(_env("RECO_FRESHNESS_HALF_LIFE_DAYS", "14"))
+            self.reco_dirty_batch_size = int(_env("RECO_DIRTY_BATCH_SIZE", "200"))
+            self.reco_dirty_poll_interval_seconds = float(_env("RECO_DIRTY_POLL_INTERVAL_SECONDS", "5"))
 else:
     ENV_FILE = Path(__file__).resolve().parents[1] / ".env"
 
@@ -82,6 +84,8 @@ else:
         reco_weight_freshness: float = 0.15
         reco_weight_popularity: float = 0.1
         reco_freshness_half_life_days: float = 14.0
+        reco_dirty_batch_size: int = 200
+        reco_dirty_poll_interval_seconds: float = 5.0
 
         model_config = SettingsConfigDict(
             env_file=str(ENV_FILE),

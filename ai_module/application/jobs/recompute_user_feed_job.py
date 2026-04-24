@@ -148,15 +148,15 @@ def _build_hybrid_recommendations_for_user(
     return combined[:top_k]
 
 
-def recompute_user_feed_once(
+def _resolve_params(
     *,
-    top_k: int | None = None,
-    lookback_days: int | None = None,
-    half_life_days: float | None = None,
-    max_items_per_user: int | None = None,
-    neighbors_per_item: int | None = None,
-    min_score: float | None = None,
-) -> RecomputeFeedResult:
+    top_k: int | None,
+    lookback_days: int | None,
+    half_life_days: float | None,
+    max_items_per_user: int | None,
+    neighbors_per_item: int | None,
+    min_score: float | None,
+) -> tuple[int, int, float, int, int, float, float, float, float, float, float]:
     resolved_top_k = settings.reco_top_k if top_k is None else top_k
     resolved_lookback_days = settings.reco_lookback_days if lookback_days is None else lookback_days
     resolved_half_life = settings.reco_half_life_days if half_life_days is None else half_life_days
@@ -168,6 +168,221 @@ def recompute_user_feed_once(
     resolved_weight_freshness = settings.reco_weight_freshness
     resolved_weight_popularity = settings.reco_weight_popularity
     resolved_freshness_half_life = settings.reco_freshness_half_life_days
+    return (
+        resolved_top_k,
+        resolved_lookback_days,
+        resolved_half_life,
+        resolved_max_items,
+        resolved_neighbors,
+        resolved_min_score,
+        resolved_weight_cf,
+        resolved_weight_category,
+        resolved_weight_freshness,
+        resolved_weight_popularity,
+        resolved_freshness_half_life,
+    )
+
+
+def _recompute_for_user_ids(
+    *,
+    repository: FeedRepository,
+    connection: object,
+    user_ids: list[str],
+    top_k: int,
+    lookback_days: int,
+    half_life_days: float,
+    max_items_per_user: int,
+    neighbors_per_item: int,
+    min_score: float,
+    weight_cf: float,
+    weight_category: float,
+    weight_freshness: float,
+    weight_popularity: float,
+    freshness_half_life_days: float,
+) -> RecomputeFeedResult:
+    target_user_ids = list(dict.fromkeys(user_ids))
+    if not target_user_ids:
+        return RecomputeFeedResult(
+            users_total=0,
+            users_updated=0,
+            rows_written=0,
+            interactions_total=0,
+            lock_acquired=True,
+        )
+
+    interactions = repository.fetch_interactions(lookback_days=lookback_days)
+    published_articles = repository.fetch_published_articles()
+    published_ids = [article.article_id for article in published_articles]
+    article_categories = {
+        article.article_id: article.category_ids
+        for article in published_articles
+    }
+    article_published_at = {
+        article.article_id: article.published_at
+        for article in published_articles
+    }
+
+    now = datetime.now(tz=UTC)
+    model = build_item_to_item_model(
+        interactions=interactions,
+        now=now,
+        half_life_days=half_life_days,
+        max_items_per_user=max_items_per_user,
+        neighbors_per_item=neighbors_per_item,
+    )
+    category_preferences_by_user = _build_category_preferences(
+        interactions,
+        article_categories=article_categories,
+        now=now,
+        half_life_days=half_life_days,
+    )
+    popularity_scores = {
+        article_id: score
+        for article_id, score in model.popular_items
+    }
+    popularity_scores_normalized = _normalize_scores(popularity_scores)
+
+    users_updated = 0
+    rows_written = 0
+
+    with connection.transaction():
+        for user_id in target_user_ids:
+            recommendations = _build_hybrid_recommendations_for_user(
+                user_id=user_id,
+                top_k=top_k,
+                min_score=min_score,
+                seen_ids=model.user_seen.get(user_id, set()),
+                all_published_ids=published_ids,
+                article_categories=article_categories,
+                article_published_at=article_published_at,
+                cf_scores_raw=model.score_candidates_for_user(
+                    user_id=user_id,
+                    min_score=0.0,
+                ),
+                category_preferences=category_preferences_by_user.get(user_id, {}),
+                popularity_scores_normalized=popularity_scores_normalized,
+                now=now,
+                freshness_half_life_days=freshness_half_life_days,
+                weight_cf=weight_cf,
+                weight_category=weight_category,
+                weight_freshness=weight_freshness,
+                weight_popularity=weight_popularity,
+            )
+            written = repository.replace_user_feed(user_id, recommendations)
+            users_updated += 1
+            rows_written += written
+
+    logger.info(
+        "recompute_user_feed completed users_total=%s users_updated=%s rows_written=%s interactions_total=%s",
+        len(target_user_ids),
+        users_updated,
+        rows_written,
+        len(interactions),
+    )
+
+    return RecomputeFeedResult(
+        users_total=len(target_user_ids),
+        users_updated=users_updated,
+        rows_written=rows_written,
+        interactions_total=len(interactions),
+        lock_acquired=True,
+    )
+
+
+def recompute_user_feed_for_user_ids(
+    user_ids: list[str],
+    *,
+    top_k: int | None = None,
+    lookback_days: int | None = None,
+    half_life_days: float | None = None,
+    max_items_per_user: int | None = None,
+    neighbors_per_item: int | None = None,
+    min_score: float | None = None,
+) -> RecomputeFeedResult:
+    (
+        resolved_top_k,
+        resolved_lookback_days,
+        resolved_half_life,
+        resolved_max_items,
+        resolved_neighbors,
+        resolved_min_score,
+        resolved_weight_cf,
+        resolved_weight_category,
+        resolved_weight_freshness,
+        resolved_weight_popularity,
+        resolved_freshness_half_life,
+    ) = _resolve_params(
+        top_k=top_k,
+        lookback_days=lookback_days,
+        half_life_days=half_life_days,
+        max_items_per_user=max_items_per_user,
+        neighbors_per_item=neighbors_per_item,
+        min_score=min_score,
+    )
+
+    with get_connection() as connection:
+        repository = FeedRepository(connection)
+        lock_acquired = repository.try_acquire_lock()
+        if not lock_acquired:
+            logger.info("recompute_user_feed_for_user_ids skipped: advisory lock is already held")
+            return RecomputeFeedResult(
+                users_total=0,
+                users_updated=0,
+                rows_written=0,
+                interactions_total=0,
+                lock_acquired=False,
+            )
+
+        try:
+            return _recompute_for_user_ids(
+                repository=repository,
+                connection=connection,
+                user_ids=user_ids,
+                top_k=resolved_top_k,
+                lookback_days=resolved_lookback_days,
+                half_life_days=resolved_half_life,
+                max_items_per_user=resolved_max_items,
+                neighbors_per_item=resolved_neighbors,
+                min_score=resolved_min_score,
+                weight_cf=resolved_weight_cf,
+                weight_category=resolved_weight_category,
+                weight_freshness=resolved_weight_freshness,
+                weight_popularity=resolved_weight_popularity,
+                freshness_half_life_days=resolved_freshness_half_life,
+            )
+        finally:
+            repository.release_lock()
+
+
+def recompute_user_feed_once(
+    *,
+    top_k: int | None = None,
+    lookback_days: int | None = None,
+    half_life_days: float | None = None,
+    max_items_per_user: int | None = None,
+    neighbors_per_item: int | None = None,
+    min_score: float | None = None,
+) -> RecomputeFeedResult:
+    (
+        resolved_top_k,
+        resolved_lookback_days,
+        resolved_half_life,
+        resolved_max_items,
+        resolved_neighbors,
+        resolved_min_score,
+        resolved_weight_cf,
+        resolved_weight_category,
+        resolved_weight_freshness,
+        resolved_weight_popularity,
+        resolved_freshness_half_life,
+    ) = _resolve_params(
+        top_k=top_k,
+        lookback_days=lookback_days,
+        half_life_days=half_life_days,
+        max_items_per_user=max_items_per_user,
+        neighbors_per_item=neighbors_per_item,
+        min_score=min_score,
+    )
 
     with get_connection() as connection:
         repository = FeedRepository(connection)
@@ -184,82 +399,21 @@ def recompute_user_feed_once(
 
         try:
             user_ids = repository.fetch_user_ids()
-            interactions = repository.fetch_interactions(lookback_days=resolved_lookback_days)
-            published_articles = repository.fetch_published_articles()
-            published_ids = [article.article_id for article in published_articles]
-            article_categories = {
-                article.article_id: article.category_ids
-                for article in published_articles
-            }
-            article_published_at = {
-                article.article_id: article.published_at
-                for article in published_articles
-            }
-
-            now = datetime.now(tz=UTC)
-            model = build_item_to_item_model(
-                interactions=interactions,
-                now=now,
+            return _recompute_for_user_ids(
+                repository=repository,
+                connection=connection,
+                user_ids=user_ids,
+                top_k=resolved_top_k,
+                lookback_days=resolved_lookback_days,
                 half_life_days=resolved_half_life,
                 max_items_per_user=resolved_max_items,
                 neighbors_per_item=resolved_neighbors,
-            )
-            category_preferences_by_user = _build_category_preferences(
-                interactions,
-                article_categories=article_categories,
-                now=now,
-                half_life_days=resolved_half_life,
-            )
-            popularity_scores = {
-                article_id: score
-                for article_id, score in model.popular_items
-            }
-            popularity_scores_normalized = _normalize_scores(popularity_scores)
-
-            users_updated = 0
-            rows_written = 0
-
-            with connection.transaction():
-                for user_id in user_ids:
-                    recommendations = _build_hybrid_recommendations_for_user(
-                        user_id=user_id,
-                        top_k=resolved_top_k,
-                        min_score=resolved_min_score,
-                        seen_ids=model.user_seen.get(user_id, set()),
-                        all_published_ids=published_ids,
-                        article_categories=article_categories,
-                        article_published_at=article_published_at,
-                        cf_scores_raw=model.score_candidates_for_user(
-                            user_id=user_id,
-                            min_score=0.0,
-                        ),
-                        category_preferences=category_preferences_by_user.get(user_id, {}),
-                        popularity_scores_normalized=popularity_scores_normalized,
-                        now=now,
-                        freshness_half_life_days=resolved_freshness_half_life,
-                        weight_cf=resolved_weight_cf,
-                        weight_category=resolved_weight_category,
-                        weight_freshness=resolved_weight_freshness,
-                        weight_popularity=resolved_weight_popularity,
-                    )
-                    written = repository.replace_user_feed(user_id, recommendations)
-                    users_updated += 1
-                    rows_written += written
-
-            logger.info(
-                "recompute_user_feed completed users_total=%s users_updated=%s rows_written=%s interactions_total=%s",
-                len(user_ids),
-                users_updated,
-                rows_written,
-                len(interactions),
-            )
-
-            return RecomputeFeedResult(
-                users_total=len(user_ids),
-                users_updated=users_updated,
-                rows_written=rows_written,
-                interactions_total=len(interactions),
-                lock_acquired=True,
+                min_score=resolved_min_score,
+                weight_cf=resolved_weight_cf,
+                weight_category=resolved_weight_category,
+                weight_freshness=resolved_weight_freshness,
+                weight_popularity=resolved_weight_popularity,
+                freshness_half_life_days=resolved_freshness_half_life,
             )
         finally:
             repository.release_lock()
