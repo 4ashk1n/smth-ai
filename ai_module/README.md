@@ -1,74 +1,17 @@
-﻿# AI Module
+﻿# SMTH AI
+ИИ часть проекта **SMTH**
 
-## What is implemented
-- Domain models for article/content/blocks.
-- Suggestions model with target ids (`article/topic/page/block`).
-- Text suggestions pipeline via GigaChat.
-- Layout suggestions pipeline via deterministic rules.
-- FastAPI endpoints for suggestions.
-- File logging per subsystem with rotation.
+## Установка
+1. `git clone https://github.com/4ashk1n/smth-ai.git`
+2. `cd smth-ai`
+3. `cp .env.example .env`
+4. Настроить переменные окружения в `.env`
+5. `python -m venv venv`
+6. `source venv/bin/activate` (Mac/Linux) / `./venv/Scripts/activate` (Windows)
+7. `pip install -r requirements.txt`
 
-## Install
-
-```powershell
-pip install -r ai_module/requirements.txt
-```
-
-## Run API
-
-```powershell
-uvicorn ai_module.api.main:app --reload
-```
-
-or:
-
-```powershell
-python -m ai_module.scripts.run_server --reload
-```
-
-## Endpoints
-- `GET /api/v1/health`
-- `POST /api/v1/suggestions/layout`
-- `POST /api/v1/suggestions/text`
-- `POST /api/v1/suggestions/all`
-
-## API docs
-- Swagger UI: `/swagger`
-- ReDoc: `/redoc`
-- OpenAPI JSON: `/openapi.json`
-
-## Logs
-- `ai_module/logs/app.log`
-- `ai_module/logs/api.log`
-- `ai_module/logs/llm.log`
-- `ai_module/logs/httpx.log`
-
-## Live GigaChat check
-
-```powershell
-python -m ai_module.scripts.check_gigachat
-```
-
-## Recompute user feed (manual run)
-
-```powershell
-python -m ai_module.scripts.recompute_user_feed
-```
-
-Optional overrides:
-
-```powershell
-python -m ai_module.scripts.recompute_user_feed --top-k 100 --lookback-days 180 --half-life-days 30
-```
-
-## Recompute dirty users (DB queue poller)
-
-```powershell
-python -m ai_module.scripts.poll_dirty_user_feed
-```
-
-One batch and exit:
-
-```powershell
-python -m ai_module.scripts.poll_dirty_user_feed --once --batch-size 200
-```
+## Запуск
+1. Рекомендации
+* Полный пересчет рекомендаций всех пользователей - Подключить cron к `python -m ai_module.features.recommendations.jobs.recompute_user_feed`
+* Пересчет рекомендаций пользователя при получении новой метрики - `python -m ai_module.features.recommendations.jobs.poll_dirty_user_feed`
+2. Подсказки ИИ GigaChat: `python -m ai_module.app.run_server --reload`
